@@ -280,20 +280,25 @@ struct Eta {
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, checkpoint: StageCheckpoint) {
-        let Some(current) = checkpoint.entities() else { return };
+        if let Some(current) = checkpoint.entities() {
+            // Debug statement to check if checkpoint has entities
+            println!("Checkpoint has entities: {:?}", current);
 
-        if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
-            let processed_since_last = current.processed - self.last_checkpoint.processed;
-            let elapsed = last_checkpoint_time.elapsed();
-            let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
+            if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
+                let processed_since_last = current.processed - self.last_checkpoint.processed;
+                let elapsed = last_checkpoint_time.elapsed();
+                let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
 
-            self.eta = Some(Duration::from_secs_f64(
-                (current.total - current.processed) as f64 / per_second,
-            ));
+                self.eta = Some(Duration::from_secs_f64(
+                    (current.total - current.processed) as f64 / per_second,
+                ));
+            }
+
+            self.last_checkpoint = current;
+            self.last_checkpoint_time = Some(Instant::now());
+        } else {
+            println!("Checkpoint has no entities. Skipping update.");
         }
-
-        self.last_checkpoint = current;
-        self.last_checkpoint_time = Some(Instant::now());
     }
 }
 
