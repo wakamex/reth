@@ -121,6 +121,8 @@ impl Logs {
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
     {
+        let start_time = Instant::now(); // Start measuring time
+
         let filter = EnvFilter::builder().parse(&self.filter)?;
 
         if self.journald {
@@ -131,6 +133,9 @@ impl Logs {
         } else {
             Ok(None)
         }
+
+        let elapsed_time = start_time.elapsed(); // Calculate elapsed time
+        println!("Time spent logging: {:?}", elapsed_time); // Print elapsed time
     }
 }
 
