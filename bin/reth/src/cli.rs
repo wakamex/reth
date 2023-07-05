@@ -10,9 +10,40 @@ use crate::{
 use clap::{ArgAction, Args, Parser, Subcommand};
 use reth_tracing::{
     tracing::{metadata::LevelFilter, Level, Subscriber},
-    tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
+    tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter, layer::Layer},
     BoxedLayer, FileWorkerGuard,
+    tracing::Event,
 };
+use std::time::Instant;
+use reth_stages::StageSet;
+
+#[derive(Debug)]
+struct TimingLayer<L> {
+    inner: L,
+}
+
+impl<L> TimingLayer<L> {
+    fn new(inner: L) -> Self {
+        TimingLayer { inner }
+    }
+}
+
+impl<S, L> Layer<S> for TimingLayer<L>
+where
+    S: LookupSpan<'static> + tracing::Subscriber,
+    L: Layer<S>,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: reth_tracing::tracing_subscriber::layer::Context<'_, S>) {
+        let start_time = Instant::now(); // Start measuring time
+
+        self.inner.on_event(event, _ctx);
+
+        let elapsed_time = start_time.elapsed(); // Calculate elapsed time
+        println!("Time spent logging: {:?}", elapsed_time); // Print elapsed time
+    }
+
+    // Implement other required methods...
+}
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
@@ -114,28 +145,32 @@ pub struct Logs {
     filter: String,
 }
 
-impl Logs {
+impl<DB> Logs<DB> // Add the constraint for the `DB` type parameter
+where
+    DB: StageSet<DB>, // Add the constraint for the `DB` type parameter
+{
     /// Builds a tracing layer from the current log options.
     pub fn layer<S>(&self) -> eyre::Result<Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>>
     where
-        S: Subscriber,
+        S: Subscriber + StageSet<DB>, // Add the StageSet trait as a bound
         for<'a> S: LookupSpan<'a>,
     {
-        let start_time = Instant::now(); // Start measuring time
-
         let filter = EnvFilter::builder().parse(&self.filter)?;
 
+        let subscriber = S::builder()
+            .with_env_filter(filter.clone()) // Add the environment filter to the subscriber
+            .with(TimingLayer::new(filter)) // Add the timing layer to the subscriber
+            .try_init();
+
         if self.journald {
-            Ok(Some((reth_tracing::journald(filter).expect("Could not connect to journald"), None)))
+            let layer = reth_tracing::journald(filter).expect("Could not connect to journald");
+            Ok(Some((Box::new(layer), None)))
         } else if self.persistent {
             let (layer, guard) = reth_tracing::file(filter, &self.log_directory, "reth.log");
-            Ok(Some((layer, Some(guard))))
+            Ok(Some((Box::new(layer), Some(guard))))
         } else {
             Ok(None)
         }
-
-        let elapsed_time = start_time.elapsed(); // Calculate elapsed time
-        println!("Time spent logging: {:?}", elapsed_time); // Print elapsed time
     }
 }
 
