@@ -13,10 +13,13 @@ use reth_tracing::{
     tracing_subscriber::{filter::Directive, registry::LookupSpan, EnvFilter},
     BoxedLayer, FileWorkerGuard,
 };
+use tracing::{info};
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
+    info!(target: "reth::cli", "Starting reth {}", LONG_VERSION);
+    info!(target: "reth::cli", "CLI options: {:#?}", opt);
 
     let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
     let _guard = opt.logs.layer()?.map(|(layer, guard)| {
@@ -123,6 +126,11 @@ impl Logs {
     {
         let filter = EnvFilter::builder().parse(&self.filter)?;
 
+        // log everything needed to debug this function
+        info!(target: "reth::cli", "Setting log filter to: {:?}", filter);
+        info!(target: "reth::cli", "Setting log directory to: {:?}", self.log_directory);
+        info!(target: "reth::cli", "Setting log journald to: {:?}", self.journald);
+        info!(target: "reth::cli", "Setting log persistent to: {:?}", self.persistent);
         if self.journald {
             Ok(Some((reth_tracing::journald(filter).expect("Could not connect to journald"), None)))
         } else if self.persistent {

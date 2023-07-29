@@ -572,6 +572,7 @@ where
         state: ForkchoiceState,
         attrs: Option<PayloadAttributes>,
     ) -> Result<OnForkChoiceUpdated, reth_interfaces::Error> {
+        debug!(target: "consensus::engine", "Updating forkchoice with state: {:?}", state);
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
         if state.head_block_hash.is_zero() {
             return Ok(OnForkChoiceUpdated::invalid_state())
@@ -592,6 +593,7 @@ where
 
         let status = match self.blockchain.make_canonical(&state.head_block_hash) {
             Ok(outcome) => {
+                debug!(target: "consensus::engine", "Made canonical with outcome: {:?}", outcome);
                 if !outcome.is_already_canonical() {
                     debug!(target: "consensus::engine", hash=?state.head_block_hash, number=outcome.header().number, "canonicalized new head");
 
@@ -616,6 +618,7 @@ where
                 PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
             Err(error) => {
+                debug!(target: "consensus::engine", "Failed to make canonical with error: {:?}", error);
                 if let Error::Execution(ref err) = error {
                     if err.is_fatal() {
                         tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
@@ -643,6 +646,7 @@ where
         head: SealedHeader,
         update: &ForkchoiceState,
     ) -> Result<(), reth_interfaces::Error> {
+        debug!(target: "consensus::engine", "Updating canon chain with head: {:?}", head);
         let mut head_block = Head {
             number: head.number,
             hash: head.hash,
@@ -1161,6 +1165,7 @@ where
             // (new FCU received)
             match self.blockchain.make_canonical(&target.head_block_hash) {
                 Ok(outcome) => {
+                    debug!(target: "consensus::engine", "Made canonical with outcome: {:?}", outcome);
                     let new_head = outcome.into_header();
                     debug!(target: "consensus::engine", hash=?new_head.hash, number=new_head.number, "canonicalized new head");
 
@@ -1177,6 +1182,7 @@ where
                     // if we failed to make the FCU's head canonical, because we don't have that
                     // block yet, then we can try to make the inserted block canonical if we know
                     // it's part of the canonical chain: if it's the safe or the finalized block
+                    debug!(target: "consensus::engine", "Failed to make canonical with error: {:?}", err);
                     if matches!(
                         err,
                         reth_interfaces::Error::Execution(

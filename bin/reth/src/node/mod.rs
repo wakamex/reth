@@ -178,7 +178,7 @@ impl Command {
 
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
+        debug!(target: "reth::cli", "{}", DisplayHardforks::from(self.chain.hardforks().clone()));
 
         let consensus: Arc<dyn Consensus> = if self.auto_mine {
             debug!(target: "reth::cli", "Using auto seal");
@@ -253,6 +253,7 @@ impl Command {
         let secret_key = get_secret_key(&network_secret_path)?;
         let default_peers_path = data_dir.known_peers_path();
         let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
+        info!(target: "reth::cli", "Head lookup returned {:#?}", head);
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
@@ -349,12 +350,12 @@ impl Command {
 
         let initial_target = if let Some(tip) = self.debug.tip {
             // Set the provided tip as the initial pipeline target.
-            debug!(target: "reth::cli", %tip, "Tip manually set");
+            info!(target: "reth::cli", "Tip manually set: {}", tip);
             Some(tip)
         } else if self.debug.continuous {
             // Set genesis as the initial pipeline target.
             // This will allow the downloader to start
-            debug!(target: "reth::cli", "Continuous sync mode enabled");
+            info!(target: "reth::cli", "Continuous sync mode enabled");
             Some(genesis_hash)
         } else {
             None
@@ -669,7 +670,7 @@ impl Command {
         let mut builder = Pipeline::builder();
 
         if let Some(max_block) = max_block {
-            debug!(target: "reth::cli", max_block, "Configuring builder to use max block");
+            info!(target: "reth::cli", max_block, "Configuring builder to use max block");
             builder = builder.with_max_block(max_block)
         }
 
