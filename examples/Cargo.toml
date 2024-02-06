@@ -26,10 +26,18 @@ eyre.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
+serde = { version = "1.0", default-features = false }
+csv = "1.1"
+reth-interfaces.workspace = true
+rayon.workspace = true
 
 [[example]]
 name = "db-access"
 path = "db-access.rs"
+
+[[example]]
+name = "log-lookup"
+path = "log-lookup.rs"
 
 [[example]]
 name = "network"
