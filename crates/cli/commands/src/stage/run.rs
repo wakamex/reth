@@ -77,6 +77,10 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long)]
     batch_size: Option<u64>,
 
+    /// Threshold (in number of blocks) for switching from incremental trie building to full rebuild.
+    #[arg(long)]
+    clean_threshold: Option<u64>,
+
     /// Normally, running the stage requires unwinding for stages that already
     /// have been run, in order to not rewrite to the same database slots.
     ///
@@ -272,7 +276,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             max_cumulative_gas: None,
                             max_duration: None,
                         },
-                        config.stages.merkle.clean_threshold,
+                        self.clean_threshold.unwrap_or(config.stages.merkle.clean_threshold),
                         ExExManagerHandle::empty(),
                     )),
                     None,
@@ -300,7 +304,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     None,
                 ),
                 StageEnum::Merkle => (
-                    Box::new(MerkleStage::new_execution(config.stages.merkle.clean_threshold)),
+                    Box::new(MerkleStage::new_execution(self.clean_threshold.unwrap_or(
+                        config.stages.merkle.clean_threshold,
+                    ))),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
                 StageEnum::AccountHistory => (

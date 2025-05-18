@@ -16,6 +16,7 @@ use reth_node_core::{
     version,
 };
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+use tracing::warn;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -104,6 +105,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten)]
     pub pruning: PruningArgs,
 
+    /// Override the clean_threshold for the Merkle stage (in number of blocks).
+    #[arg(long = "stages.merkle.clean-threshold", value_name = "BLOCKS", value_parser = value_parser!(u64))]
+    pub stages_merkle_clean_threshold: Option<u64>,
+
     /// Engine cli arguments
     #[command(flatten, next_help_heading = "Engine")]
     pub engine: EngineArgs,
@@ -160,6 +165,7 @@ impl<
             db,
             dev,
             pruning,
+            stages_merkle_clean_threshold,
             ext,
             engine,
         } = self;
@@ -181,6 +187,22 @@ impl<
             pruning,
             engine,
         };
+
+        // Apply CLI override for merkle clean threshold
+        if let Some(threshold) = stages_merkle_clean_threshold {
+            // Load the config file or use default
+            let config_path = node_config.config.clone().unwrap_or_else(|| node_config.datadir().config());
+            let mut toml_config = reth_config::Config::from_path(&config_path)
+                .map_err(|e| eyre::eyre!("Failed to load config file: {e}"))?;
+            
+            // Update the clean threshold in the loaded config
+            toml_config.stages.merkle.clean_threshold = threshold;
+            
+            // Save the updated config
+            if let Err(e) = toml_config.save(&config_path) {
+                warn!(target: "reth::cli", "Failed to save updated config file: {e}");
+            }
+        }
 
         let data_dir = node_config.datadir();
         let db_path = data_dir.db();
@@ -395,5 +417,12 @@ mod tests {
 
         // make sure the ipc path is not the default
         assert_ne!(cmd.rpc.ipcpath, String::from("/tmp/reth.ipc"));
+    }
+
+    #[test]
+    fn parse_stages_merkle_clean_threshold() {
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::try_parse_args_from(["reth", "--stages.merkle.clean-threshold", "12345"]).unwrap();
+        assert_eq!(cmd.stages_merkle_clean_threshold, Some(12345));
     }
 }
