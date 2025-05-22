@@ -67,7 +67,11 @@ pub mod evm {
 #[cfg(feature = "network")]
 pub mod network {
     #[doc(inline)]
+    pub use reth_eth_wire as eth_wire;
+    #[doc(inline)]
     pub use reth_network::*;
+    #[doc(inline)]
+    pub use reth_network_api as api;
 }
 
 /// Re-exported reth provider types
@@ -92,6 +96,8 @@ pub mod storage {
 pub mod node {
     #[doc(inline)]
     pub use reth_node_api as api;
+    #[cfg(feature = "node")]
+    pub use reth_node_builder as builder;
     #[doc(inline)]
     pub use reth_node_core as core;
     #[cfg(feature = "node")]

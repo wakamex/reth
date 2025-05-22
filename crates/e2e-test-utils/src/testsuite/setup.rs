@@ -79,7 +79,7 @@ impl<I> Setup<I> {
     }
 
     /// Set the genesis block
-    pub fn with_genesis(mut self, genesis: Genesis) -> Self {
+    pub const fn with_genesis(mut self, genesis: Genesis) -> Self {
         self.genesis = Some(genesis);
         self
     }
@@ -103,13 +103,13 @@ impl<I> Setup<I> {
     }
 
     /// Set the network configuration
-    pub fn with_network(mut self, network: NetworkSetup) -> Self {
+    pub const fn with_network(mut self, network: NetworkSetup) -> Self {
         self.network = network;
         self
     }
 
     /// Set dev mode
-    pub fn with_dev_mode(mut self, is_dev: bool) -> Self {
+    pub const fn with_dev_mode(mut self, is_dev: bool) -> Self {
         self.is_dev = is_dev;
         self
     }
@@ -161,9 +161,9 @@ impl<I> Setup<I> {
                     let rpc = node
                         .rpc_client()
                         .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
-                    let engine = node.engine_api_client();
+                    let auth = node.auth_server_handle();
 
-                    node_clients.push(crate::testsuite::NodeClient { rpc, engine });
+                    node_clients.push(crate::testsuite::NodeClient::new(rpc, auth));
                 }
 
                 // spawn a separate task just to handle the shutdown
@@ -240,12 +240,12 @@ pub struct NetworkSetup {
 
 impl NetworkSetup {
     /// Create a new network setup with a single node
-    pub fn single_node() -> Self {
+    pub const fn single_node() -> Self {
         Self { node_count: 1 }
     }
 
     /// Create a new network setup with multiple nodes
-    pub fn multi_node(count: usize) -> Self {
+    pub const fn multi_node(count: usize) -> Self {
         Self { node_count: count }
     }
 }

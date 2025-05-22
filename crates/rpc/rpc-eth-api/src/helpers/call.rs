@@ -22,7 +22,6 @@ use reth_evm::{
 };
 use reth_node_api::{BlockBody, NodePrimitives};
 use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
-use reth_provider::{BlockIdReader, ProviderHeader, ProviderTx};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -35,6 +34,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
+use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
 use revm::{
     context_interface::{
         result::{ExecutionResult, ResultAndState},
@@ -65,7 +65,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// The transactions are packed into individual blocks. Overrides can be provided.
     ///
     /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
-    #[allow(clippy::type_complexity)]
     fn simulate_v1(
         &self,
         payload: SimulatePayload,
@@ -110,14 +109,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     evm_env.cfg_env.disable_eip3607 = true;
 
                     if !validation {
-                        evm_env.cfg_env.disable_base_fee = !validation;
+                        // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
+                        evm_env.cfg_env.disable_nonce_check = true;
+                        evm_env.cfg_env.disable_base_fee = true;
                         evm_env.block_env.basefee = 0;
                     }
 
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     if let Some(block_overrides) = block_overrides {
-                        // ensure we dont allow uncapped gas limit per block
+                        // ensure we don't allow uncapped gas limit per block
                         if let Some(gas_limit_override) = block_overrides.gas_limit {
                             if gas_limit_override > evm_env.block_env.gas_limit &&
                                 gas_limit_override > this.call_gas_limit()
@@ -229,7 +230,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = Result<Vec<EthCallResponse>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send {
         async move {
             // Check if the vector of bundles is empty
             if bundles.is_empty() {
@@ -279,7 +280,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let this = self.clone();
             self.spawn_with_state_at_block(at.into(), move |state| {
-                let mut results = Vec::new();
+                let mut all_results = Vec::with_capacity(bundles.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
@@ -301,6 +302,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         continue;
                     }
 
+                    let mut bundle_results = Vec::with_capacity(transactions.len());
                     let block_overrides = block_override.map(Box::new);
 
                     // transact all transactions in the bundle
@@ -316,10 +318,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         match ensure_success::<_, Self::Error>(res.result) {
                             Ok(output) => {
-                                results.push(EthCallResponse { value: Some(output), error: None });
+                                bundle_results
+                                    .push(EthCallResponse { value: Some(output), error: None });
                             }
                             Err(err) => {
-                                results.push(EthCallResponse {
+                                bundle_results.push(EthCallResponse {
                                     value: None,
                                     error: Some(err.to_string()),
                                 });
@@ -330,9 +333,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         // see the updates
                         db.commit(res.state);
                     }
+
+                    all_results.push(bundle_results);
                 }
 
-                Ok(results)
+                Ok(all_results)
             })
             .await
         }
@@ -344,6 +349,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
+        state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
         Self: Trace,
@@ -352,8 +358,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io(move |this| this.create_access_list_with(evm_env, at, request))
-                .await
+            self.spawn_blocking_io(move |this| {
+                this.create_access_list_with(evm_env, at, request, state_override)
+            })
+            .await
         }
     }
 
@@ -364,12 +372,17 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         mut evm_env: EvmEnvFor<Self::Evm>,
         at: BlockId,
         mut request: TransactionRequest,
+        state_override: Option<StateOverride>,
     ) -> Result<AccessListResult, Self::Error>
     where
         Self: Trace,
     {
         let state = self.state_at_block_id(at)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+        if let Some(state_overrides) = state_override {
+            apply_state_overrides(state_overrides, &mut db)?;
+        }
 
         let mut tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
 
@@ -381,6 +394,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         evm_env.cfg_env.disable_base_fee = true;
+
+        // Disabled because eth_createAccessList is sometimes used with non-eoa senders
+        evm_env.cfg_env.disable_eip3607 = true;
 
         if request.gas.is_none() && tx_env.gas_price() > 0 {
             let cap = caller_gas_allowance(&mut db, &tx_env)?;
